@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
 import pickle
-import os
 
 # ---------------- PAGE CONFIG ----------------
 st.set_page_config(
@@ -16,19 +15,22 @@ st.write(
     "based on academic and lifestyle factors."
 )
 
-# ---------------- LOAD MODEL & COLUMNS ----------------
+# ---------------- LOAD MODEL, SCALER & COLUMNS ----------------
 @st.cache_resource
 def load_artifacts():
     with open("model/student_performance_model.pkl", "rb") as f:
         model = pickle.load(f)
 
+    with open("model/scaler.pkl", "rb") as f:
+        scaler = pickle.load(f)
+
     with open("model/columns.pkl", "rb") as f:
         columns = pickle.load(f)
 
-    return model, columns
+    return model, scaler, columns
 
 
-model, feature_columns = load_artifacts()
+model, scaler, feature_columns = load_artifacts()
 
 # ---------------- INPUT UI ----------------
 st.header("📝 Enter Student Details")
@@ -41,7 +43,7 @@ previous_scores = st.number_input("Previous Scores", 0.0, 100.0, 90.0)
 tutoring_sessions = st.number_input("Tutoring Sessions", 0, 20, 3)
 physical_activity = st.number_input("Physical Activity (hrs/week)", 0.0, 20.0, 1.0)
 
-# Categorical dropdowns
+# Categorical inputs
 teacher_quality = st.selectbox("Teacher Quality", ["High", "Medium", "Low"])
 school_type = st.selectbox("School Type", ["Private", "Public"])
 peer_influence = st.selectbox("Peer Influence", ["Positive", "Neutral", "Negative"])
@@ -67,10 +69,8 @@ input_data = {
     "Physical_Activity": physical_activity,
 }
 
-# One-hot encoding manually (same as training)
 def one_hot(name, value, options):
     return {f"{name}_{opt}": 1 if value == opt else 0 for opt in options}
-
 
 input_data.update(one_hot("Teacher_Quality", teacher_quality, ["Low", "Medium", "High"]))
 input_data.update(one_hot("School_Type", school_type, ["Public", "Private"]))
@@ -92,18 +92,22 @@ input_data["Extracurricular_Activities_Yes"] = 1 if extracurricular == "Yes" els
 # Create DataFrame
 input_df = pd.DataFrame([input_data])
 
-# Ensure column order matches training
+# Ensure correct column order
 input_df = input_df.reindex(columns=feature_columns, fill_value=0)
 
 # ---------------- PREDICTION ----------------
 if st.button("🎯 Predict Result"):
-    prediction = model.predict(input_df)[0]
+    # SCALE INPUT (THIS WAS MISSING BEFORE ❌)
+    input_scaled = scaler.transform(input_df)
 
-    if prediction == 1:
-        st.success("✅ Student is likely to **PASS**")
+    # PROBABILITY-BASED PREDICTION
+    proba = model.predict_proba(input_scaled)[0][1]
+    threshold = 0.6
+
+    if proba >= threshold:
+        st.success(f"✅ Student is likely to **PASS** (Confidence: {proba:.2f})")
     else:
-        st.error("❌ Student is likely to **FAIL**")
+        st.error(f"❌ Student is likely to **FAIL** (Confidence: {1 - proba:.2f})")
 
-    # Debug (optional)
     with st.expander("🔍 Debug: Model Input"):
         st.dataframe(input_df)
